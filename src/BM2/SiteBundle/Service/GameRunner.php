@@ -139,27 +139,6 @@ class GameRunner {
 		$query = $this->em->createQuery('UPDATE BM2SiteBundle:Character c SET c.wounded=c.wounded-10 WHERE c.wounded > 10');
 		$query->execute();
 
-		// TODO: this probably deserves its own update cycle soon...
-		// message conversations update
-		$query = $this->em->createQuery('SELECT c FROM MsgBundle:Conversation c WHERE c.app_reference IS NOT NULL');
-		$iterableResult = $query->iterate();
-		while ($row = $iterableResult->next()) {
-			$conversation = $row[0];
-			$this->mm->updateMembers($conversation);
-
-			// 30 days after the last posting, realm conversations stop being auto-managed so people can leave and the conversation can be cleaned up
-			$subquery = $this->em->createQuery('SELECT MAX(m.ts) FROM MsgBundle:Message m WHERE m.conversation = :conversation');
-			$subquery->setParameter('conversation', $conversation);
-			$last_message_ts = $subquery->getSingleScalarResult();
-			if ($last_message_ts) {
-				$last_message = new \DateTime($last_message_ts);
-				$days = $last_message->diff(new \DateTime("now"), true)->days;
-				if ($days > 30) { // FIXME: ugly hardcoded value
-					$conversation->setAppReference(null);
-				}
-			}
-		}
-
 		$this->appstate->setGlobal('cycle.characters', 'complete');
 		$this->em->flush();
 		$this->em->clear();
@@ -610,35 +589,6 @@ class GameRunner {
 				}
 			}
 		}
-
-		$query = $this->em->createQuery('SELECT r FROM BM2SiteBundle:Realm r LEFT JOIN r.conversations c WHERE r.active = true AND c.id IS NULL');
-		$result = $query->getResult();
-		foreach ($result as $realm) {
-			$this->logger->notice("missing realm conversation for ".$realm->getName());
-
-			// usually the ruler is the conversation owner, but if we don't have one, just pick the first realm member
-			$rulers = $realm->findRulers();
-			if (!$rulers->isEmpty()) {
-				$msguser = $this->mm->getMsgUser($rulers->first());
-			} else {
-				$members = $realm->findMembers(true);
-				if (!$members->isEmpty()) {
-					$msguser = $this->mm->getMsgUser($members->first());
-				} else {
-					$this->logger->notice("-- realm deserted, making inactive.");
-					$this->rm->abandon($realm);
-					$msguser = false;
-				}
-			}
-			if ($msguser) {
-				list($meta,$conversation) = $this->mm->createConversation($msguser, $realm->getFormalName(), null, $realm);
-				$this->em->flush(); // because the below needs this flushed
-				$this->mm->updateMembers($conversation);
-				$this->logger->notice("-- created");
-			}
-		}
-
-
 		$this->appstate->setGlobal('cycle.realm', 'complete');
 		$this->em->flush();
 		$this->em->clear();
@@ -743,6 +693,81 @@ class GameRunner {
 			}
 		}
 		$this->em->flush();
+	}
+	
+	public function runConversationsCycle () {
+		$last = $this->appstate->getGlobal('cycle.conversations', 0);
+		if ($last==='complete') return true;
+		$last=(int)$last;
+		$this->logger->info("conversations...");
+		
+		$query = $this->em->createQuery('SELECT c FROM MsgBundle:Conversation c WHERE c.app_reference IS NOT NULL');
+		$iterableResult = $query->iterate();
+		while ($row = $iterableResult->next()) {
+			$conversation = $row[0];
+			$this->mm->updateMembers($conversation);
+
+			// 30 days after the last posting, realm conversations stop being auto-managed so people can leave and the conversation can be cleaned up
+			$subquery = $this->em->createQuery('SELECT MAX(m.ts) FROM MsgBundle:Message m WHERE m.conversation = :conversation');
+			$subquery->setParameter('conversation', $conversation);
+			$last_message_ts = $subquery->getSingleScalarResult();
+			if ($last_message_ts) {
+				$last_message = new \DateTime($last_message_ts);
+				$days = $last_message->diff(new \DateTime("now"), true)->days;
+				if ($days > 30) { // FIXME: ugly hardcoded value
+					$conversation->setAppReference(null);
+				}
+			}
+		}
+		$query = $this->em->createQuery('SELECT r FROM BM2SiteBundle:Realm r LEFT JOIN r.conversations c WHERE r.active = true AND c.id IS NULL');
+		$result = $query->getResult();
+		foreach ($result as $realm) {
+			$this->logger->notice("missing realm conversation for ".$realm->getName());
+
+			// usually the ruler is the conversation owner, but if we don't have one, just pick the first realm member
+			$rulers = $realm->findRulers();
+			if (!$rulers->isEmpty()) {
+				$msguser = $this->mm->getMsgUser($rulers->first());
+			} else {
+				$members = $realm->findMembers(true);
+				if (!$members->isEmpty()) {
+					$msguser = $this->mm->getMsgUser($members->first());
+				} else {
+					$this->logger->notice("-- realm deserted, making inactive.");
+					$this->rm->abandon($realm);
+					$msguser = false;
+				}
+			}
+			if ($msguser) {
+				list($meta,$conversation) = $this->mm->createConversation($msguser, $realm->getFormalName(), null, $realm);
+				$this->em->flush(); // because the below needs this flushed
+				$this->mm->updateMembers($conversation);
+				$this->logger->notice("-- created");
+			}
+		}
+		// this will manage the ruler conversation. Totally uncertain on this query though. The target is the ruler of each sovereign realm.
+		$query = $this->em->createQuery('SELECT r FROM BM2SiteBundle:Realm r WHERE r.active = true AND r.superior = r.id');
+		$result = $query->getResult();
+		foreach ($result as $realm) {
+			$this->logger->notice("updating ruler conversation");
+
+			// unlike realm conversations, if there isn't a ruler, we don't care.
+			$msguser = $realm->findRulers();
+			// we need a way to 1) make the ruler conversation update each turn for adding and removing rulers and 2) tie the conversation
+			// to the game while also 3) not bogging it down with hundreds of old messages. The only thing that comes to mind is
+			// moving message to private conversations after a couple weeks.
+			if ($msguser) {
+				list($meta,$conversation) = $this->mm->createConversation($msguser, $realm->getFormalName(), null, $realm);
+				$this->em->flush(); // because the below needs this flushed
+				$this->mm->updateMembers($conversation);
+				$this->logger->notice("-- created");
+			}
+		}
+		
+		$this->appstate->setGlobal('cycle.conversations', 'complete');
+		$this->em->flush();
+		$this->em->clear();
+		return true;
 	}
 
 
