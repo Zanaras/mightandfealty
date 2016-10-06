@@ -22,17 +22,18 @@ class TweakCommand extends ContainerAwareCommand {
 		;
 	}
 	protected function execute(InputInterface $input, OutputInterface $output) {
-		# First we define $files as the arguments submitted to the command.
+		# First we define $files as an array, and then add all 'files' submitted to it.
+		$files = array();
 		$files = $input->getArgument('files');
 		# This array will come into play later, after we make sure files exist.
 		$checked = array();
 		# And now the fun begins. With this we check that there are actually files. I'm not sure it's actually possible to get to this without there being some form of argument submitted, but who knows.
 		if ($files) {
-			# If there are files, we need to do things to them individually
+			# If there are files, we need to do things to them individually.
 			foreach ($files as $checkfile) {
 				# Namely, make sure that what you submitted is actually a file. If not, we yell error you. :)
 				# It should be stated, that this won't actually stop the command from continuing to run. 
-				if (is_file(string $checkfile) = FALSE) {
+				if (is_file(string $checkfile) == FALSE) {
 					$text = 'ERROR! No file located at '.checkfile;
 					$output->writeln($text);
 					$text = 'Proceeding with update. . .';
