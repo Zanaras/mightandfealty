@@ -72,8 +72,72 @@ class TweakCommand extends ContainerAwareCommand {
 						
 						break;
 					# Checking for BuildingData to update.
-					case (isset($BuildingDataUpdate)):
-						
+					case (isset($BuildingDataUpdate && $BuildingResourcesUpdate)):
+						# And no, if you read this, I've not actually started on any of this part yet.
+						# I literally just copied it from the forum topic. It's on the TODO list.
+						$all = new ArrayCollection();
+						foreach ($this->buildings as $name=>$data) {
+						$type = $manager->getRepository('BM2SiteBundle:BuildingType')->findOneByName($name);
+						if (!$type) {
+							$type = new BuildingType();
+							$manager->persist($type);
+						}
+						$type->setName($name);
+						$type->setBuildHours($data['work']);
+						$type->setAutoPopulation($data['auto'])->setMinPopulation($data['min']);
+						$type->setPerPeople($data['ratio']);
+						$type->setDefenses(isset($data['defenses'])?$data['defenses']:0);
+						$type->setSpecialConditions(isset($data['conditions'])?true:false);
+						if (isset($data['icon'])) {
+							$type->setIcon($data['icon']);
+						}
+						$all->add($type);
+						$this->addReference('buildingtype: '.strtolower($name), $type);
+						foreach ($this->resources[$name] as $resourcename => $resourcedata) {
+							$rt = $manager->getRepository('BM2SiteBundle:ResourceType')->findOneByName($resourcename);
+							if (!$rt) {
+								echo "can't find $resourcename needed by $name.\n";
+							}
+							$br = null;
+							foreach ($type->getResources() as $r) {
+								if ($r->getResourceType() == $rt) {
+									$br = $r;
+									break;
+									}
+								}
+								if (!$br) {
+									$br = new BuildingResource;
+									$manager->persist($br);
+								}
+								$br->setBuildingType($type);
+								$br->setResourceType($rt);
+								$br->setRequiresConstruction(isset($resourcedata['construction'])?$resourcedata['construction']:0);
+								$br->setRequiresOperation(isset($resourcedata['operation'])?$resourcedata['operation']:0);
+								$br->setProvidesOperation(isset($resourcedata['provides'])?$resourcedata['provides']:0);
+								$br->setProvidesOperationBonus(isset($resourcedata['bonus'])?$resourcedata['bonus']:0);
+							}
+						}
+						// FIXME: this does not yet clean out old data (for updates)
+						foreach ($this->buildings as $name=>$data) {
+							if (isset($data['requires'])) {
+								$me = $all->filter(function($type) use ($name) {
+									return $type->getName() == $name;
+									})->first();
+								foreach ($data['requires'] as $requires) {
+									$enabler = $all->filter(function($type) use ($requires) {
+										return $type->getName() == $requires;
+									})->first();
+									if ($enabler) {
+										if (!$me->getRequires()->contains($enabler)) {
+											$me->getRequires()->add($enabler);
+										}
+									} else {
+									echo "can't find $requires needed by $name.\n";
+									}
+								}
+							}
+						}
+						$manager->flush();
 						break;
 					# Checking for EntourageData to update.	
 					case (isset($EntourageDataUpdate)):
