@@ -30,7 +30,7 @@ class LoadBiomeData extends AbstractFixture implements OrderedFixtureInterface {
 	 * {@inheritDoc}
 	 */
 	public function getOrder() {
-		return 1; // or anywhere, really
+		return 1; // Must be loaded before WeatherData.
 	}
 
 	/**
